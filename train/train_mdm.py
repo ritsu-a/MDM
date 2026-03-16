@@ -38,17 +38,19 @@ def main():
 
     print("creating data loader...")
 
-    data = get_dataset_loader(name=args.dataset, 
-                              batch_size=args.batch_size, 
-                              num_frames=args.num_frames, 
-                              fixed_len=args.pred_len + args.context_len, 
+    data = get_dataset_loader(name=args.dataset,
+                              batch_size=args.batch_size,
+                              num_frames=args.num_frames,
+                              fixed_len=args.pred_len + args.context_len,
                               pred_len=args.pred_len,
-                              device=dist_util.dev(),)
+                              device=dist_util.dev(),
+                              data_dir=args.data_dir if getattr(args, 'data_dir', '') else "")
 
     print("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)
     model.to(dist_util.dev())
-    model.rot2xyz.smpl_model.eval()
+    if getattr(model, "rot2xyz", None) is not None and getattr(model.rot2xyz, "smpl_model", None) is not None:
+        model.rot2xyz.smpl_model.eval()
 
     print('Total params: %.2fM' % (sum(p.numel() for p in model.parameters_wo_clip()) / 1000000.0))
     print("Training...")

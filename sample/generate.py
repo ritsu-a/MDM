@@ -18,6 +18,7 @@ from data_loaders.humanml.utils.plot_script import plot_3d_motion
 import shutil
 from data_loaders.tensors import collate
 from moviepy.editor import clips_array
+import subprocess
 
 
 def main(args=None):
@@ -29,8 +30,12 @@ def main(args=None):
     n_joints = 22 if args.dataset == 'humanml' else 21
     name = os.path.basename(os.path.dirname(args.model_path))
     niter = os.path.basename(args.model_path).replace('model', '').replace('.pt', '')
-    max_frames = 196 if args.dataset in ['kit', 'humanml'] else 60
-    fps = 12.5 if args.dataset == 'kit' else 20
+    if args.dataset == 'motion_stat_300':
+        max_frames = 300
+        fps = 60
+    else:
+        max_frames = 196 if args.dataset in ['kit', 'humanml'] else 60
+        fps = 12.5 if args.dataset == 'kit' else 20
     n_frames = min(max_frames, int(args.motion_length*fps))
     is_using_data = not any([args.input_text, args.text_prompt, args.action_file, args.action_name])
     if args.context_len > 0:
@@ -141,6 +146,7 @@ def main(args=None):
         else:
             raise NotImplementedError('DiP model only supports BERT text encoder at the moment. If you implement this, please send a PR!')
     
+    all_qpos = []
     for rep_i in range(args.num_repetitions):
         print(f'### Sampling [repetitions #{rep_i}]')
 
@@ -157,18 +163,27 @@ def main(args=None):
             const_noise=False,
         )
 
-        # Recover XYZ *positions* from HumanML3D vector representation
-        if model.data_rep == 'hml_vec':
-            n_joints = 22 if sample.shape[1] == 263 else 21
-            sample = data.dataset.t2m_dataset.inv_transform(sample.cpu().permute(0, 2, 3, 1)).float()
-            sample = recover_from_ric(sample, n_joints)
-            sample = sample.view(-1, *sample.shape[2:]).permute(0, 2, 3, 1)
+        if args.dataset == 'motion_stat_300':
+            # motion_stat_300: keep qpos in original feature space (no SMPL / rot2xyz / recover_from_ric)
+            qpos = data.dataset.t2m_dataset.inv_transform(sample.cpu().permute(0, 2, 3, 1)).float().numpy()  # (B,T,60) or (B,T,1,60)
+            if qpos.ndim == 4 and qpos.shape[2] == 1:
+                qpos = np.squeeze(qpos, axis=2)
+            if qpos.ndim != 3:
+                raise ValueError(f"Unexpected qpos shape for motion_stat_300: {qpos.shape}")
+            all_qpos.append(qpos)
+        else:
+            # Recover XYZ *positions* from HumanML3D vector representation
+            if model.data_rep == 'hml_vec':
+                n_joints = 22 if sample.shape[1] == 263 else 21
+                sample = data.dataset.t2m_dataset.inv_transform(sample.cpu().permute(0, 2, 3, 1)).float()
+                sample = recover_from_ric(sample, n_joints)
+                sample = sample.view(-1, *sample.shape[2:]).permute(0, 2, 3, 1)
 
-        rot2xyz_pose_rep = 'xyz' if model.data_rep in ['xyz', 'hml_vec'] else model.data_rep
-        rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, n_frames).bool()
-        sample = model.rot2xyz(x=sample, mask=rot2xyz_mask, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
-                               jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
-                               get_rotations_back=False)
+            rot2xyz_pose_rep = 'xyz' if model.data_rep in ['xyz', 'hml_vec'] else model.data_rep
+            rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, n_frames).bool()
+            sample = model.rot2xyz(x=sample, mask=rot2xyz_mask, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
+                                   jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
+                                   get_rotations_back=False)
 
         if args.unconstrained:
             all_text += ['unconstrained'] * args.num_samples
@@ -176,7 +191,10 @@ def main(args=None):
             text_key = 'text' if 'text' in model_kwargs['y'] else 'action_text'
             all_text += model_kwargs['y'][text_key]
 
-        all_motions.append(sample.cpu().numpy())
+        if args.dataset == 'motion_stat_300':
+            all_motions.append(all_qpos[-1])
+        else:
+            all_motions.append(sample.cpu().numpy())
         _len = model_kwargs['y']['lengths'].cpu().numpy()
         if 'prefix' in model_kwargs['y'].keys():
             _len[:] = sample.shape[-1]
@@ -207,6 +225,39 @@ def main(args=None):
         fw.write(text_file_content)
     with open(npy_path.replace('.npy', '_len.txt'), 'w') as fw:
         fw.write('\n'.join([str(l) for l in all_lengths]))
+
+    if args.dataset == 'motion_stat_300':
+        if args.save_npz:
+            npz_dir = os.path.join(out_path, "npz")
+            os.makedirs(npz_dir, exist_ok=True)
+            for i in range(total_num_samples):
+                np.savez(os.path.join(npz_dir, f"sample{i:04d}.npz"), qpos=all_motions[i])
+        if args.render_video:
+            if not args.save_npz:
+                raise ValueError("--render_video requires --save_npz for motion_stat_300.")
+            if not os.path.isfile(args.render_script_path):
+                raise FileNotFoundError(f"Render script not found: {args.render_script_path}")
+            videos_dir = os.path.join(out_path, "videos")
+            os.makedirs(videos_dir, exist_ok=True)
+            for i in range(total_num_samples):
+                npz_path = os.path.join(out_path, "npz", f"sample{i:04d}.npz")
+                mp4_path = os.path.join(videos_dir, f"sample{i:04d}.mp4")
+                subprocess.run(
+                    [
+                        "python",
+                        args.render_script_path,
+                        "--npz_path",
+                        npz_path,
+                        "--video_path",
+                        mp4_path,
+                        "--motion_fps",
+                        str(args.motion_fps),
+                    ],
+                    check=True,
+                )
+        abs_path = os.path.abspath(out_path)
+        print(f'[Done] Results are at [{abs_path}]')
+        return out_path
 
     print(f"saving visualizations to [{out_path}]...")
     skeleton = paramUtil.kit_kinematic_chain if args.dataset == 'kit' else paramUtil.t2m_kinematic_chain
@@ -306,7 +357,8 @@ def load_dataset(args, max_frames, n_frames):
                               num_frames=max_frames,
                               split='test',
                               hml_mode='train' if args.pred_len > 0 else 'text_only',  # We need to sample a prefix from the dataset
-                              fixed_len=args.pred_len + args.context_len, pred_len=args.pred_len, device=dist_util.dev())
+                              fixed_len=args.pred_len + args.context_len, pred_len=args.pred_len, device=dist_util.dev(),
+                              data_dir=args.data_dir if getattr(args, "data_dir", "") else "")
     data.fixed_length = n_frames
     return data
 

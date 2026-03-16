@@ -77,7 +77,7 @@ def add_base_options(parser):
     group.add_argument("--device", default=0, type=int, help="Device id to use.")
     group.add_argument("--seed", default=10, type=int, help="For fixing random seed.")
     group.add_argument("--batch_size", default=64, type=int, help="Batch size during training.")
-    group.add_argument("--train_platform_type", default='NoPlatform', choices=['NoPlatform', 'ClearmlPlatform', 'TensorboardPlatform', 'WandBPlatform'], type=str,
+    group.add_argument("--train_platform_type", default='TensorboardPlatform', choices=['NoPlatform', 'ClearmlPlatform', 'TensorboardPlatform', 'WandBPlatform'], type=str,
                        help="Choose platform to log results. NoPlatform means no logging.")
     group.add_argument("--external_mode", default=False, type=bool, help="For backward cometability, do not change or delete.")
 
@@ -136,7 +136,7 @@ def add_model_options(parser):
 
 def add_data_options(parser):
     group = parser.add_argument_group('dataset')
-    group.add_argument("--dataset", default='humanml', choices=['humanml', 'kit', 'humanact12', 'uestc'], type=str,
+    group.add_argument("--dataset", default='humanml', choices=['humanml', 'kit', 'humanact12', 'uestc', 'motion_stat_300'], type=str,
                        help="Dataset name (choose from list).")
     group.add_argument("--data_dir", default="", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
@@ -230,6 +230,11 @@ def add_generate_options(parser):
     group.add_argument("--action_name", default='', type=str,
                        help="An action name to be generated. If empty, will take text prompts from dataset.")
     group.add_argument("--target_joint_names", default='DIMP_FINAL', type=str, help="Force single joint configuration by specifing the joints (coma separated). If None - will use the random mode for all end effectors.")
+    group.add_argument("--save_npz", action='store_true', help="If true, save generated motion as per-sample .npz files.")
+    group.add_argument("--render_video", action='store_true', help="If true, render videos from saved .npz files using an external script.")
+    group.add_argument("--render_script_path", default="/root/workspace/MotionDiT/external/GMR/scripts/vis_npz_motion.py", type=str,
+                       help="Path to external renderer script (vis_npz_motion.py).")
+    group.add_argument("--motion_fps", default=60, type=int, help="FPS used when rendering motion videos.")
 
 
 def add_edit_options(parser):
@@ -269,7 +274,7 @@ def add_evaluation_options(parser):
 def get_cond_mode(args):
     if args.unconstrained:
         cond_mode = 'no_cond'
-    elif args.dataset in ['kit', 'humanml']:
+    elif args.dataset in ['kit', 'humanml', 'motion_stat_300']:
         cond_mode = 'text'
     else:
         cond_mode = 'action'

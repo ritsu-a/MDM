@@ -47,6 +47,10 @@ def get_model_args(args, data):
         data_rep = 'hml_vec'
         njoints = 251
         nfeats = 1
+    elif args.dataset == 'motion_stat_300':
+        data_rep = 'hml_vec'
+        njoints = 60
+        nfeats = 1
 
     # Compatibility with old models
     if not hasattr(args, 'pred_len'):

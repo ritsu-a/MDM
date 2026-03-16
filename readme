@@ -1,0 +1,16 @@
+motion stat 300 t2m training
+
+    conda activate mdm
+    CUDA_VISIBLE_DEVICES=1 python -m train.train_mdm \
+    --save_dir save/motion_stat_300_t2m \
+    --dataset motion_stat_300 --save_interval 10000 \
+    --overwrite
+
+motion stat 300 t2m inference
+
+
+
+beat a2m
+
+
+
