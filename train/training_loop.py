@@ -19,8 +19,6 @@ from diffusion.fp16_util import MixedPrecisionTrainer
 from diffusion.resample import LossAwareSampler, UniformSampler
 from tqdm import tqdm
 from diffusion.resample import create_named_schedule_sampler
-from data_loaders.humanml.networks.evaluator_wrapper import EvaluatorMDMWrapper
-from eval import eval_humanml, eval_humanact12_uestc
 from sample.generate import main as generate
 from data_loaders.get_data import get_dataset_loader
 from utils.model_util import load_model_wo_clip
@@ -103,27 +101,8 @@ class TrainLoop:
 
         self.schedule_sampler_type = 'uniform'
         self.schedule_sampler = create_named_schedule_sampler(self.schedule_sampler_type, diffusion)
+        # motion_stat_300 不依赖 HumanML/KIT 的评价逻辑，这里关闭训练期自动评估
         self.eval_wrapper, self.eval_data, self.eval_gt_data = None, None, None
-        if args.dataset in ['kit', 'humanml'] and args.eval_during_training:
-            mm_num_samples = 0  # mm is super slow hence we won't run it during training
-            mm_num_repeats = 0  # mm is super slow hence we won't run it during training
-            gen_loader = get_dataset_loader(name=args.dataset, batch_size=args.eval_batch_size, num_frames=None,
-                                            split=args.eval_split,
-                                            hml_mode='eval',
-                                            autoregressive=args.autoregressive,
-                                            fixed_len=args.context_len+args.pred_len, pred_len=args.pred_len, device=dist_util.dev())
-
-            self.eval_gt_data = get_dataset_loader(name=args.dataset, batch_size=args.eval_batch_size, num_frames=None,
-                                                   split=args.eval_split,
-                                                   hml_mode='gt', device=dist_util.dev())
-            self.eval_wrapper = EvaluatorMDMWrapper(args.dataset, dist_util.dev())
-            self.eval_data = {
-                'test': lambda: eval_humanml.get_mdm_loader(self.args,
-                    self.model_for_eval, diffusion, args.eval_batch_size,
-                    gen_loader, mm_num_samples, mm_num_repeats, gen_loader.dataset.opt.max_motion_length,
-                    args.eval_num_samples, scale=args.gen_guidance_param,
-                )
-            }
         self.use_ddp = False
         self.ddp_model = self.model
 
@@ -250,43 +229,8 @@ class TrainLoop:
             self.evaluate()
 
     def evaluate(self):
-        if not self.args.eval_during_training:
-            return
-        start_eval = time.time()
-        if self.eval_wrapper is not None:
-            print('Running evaluation loop: [Should take about 90 min]')
-            log_file = os.path.join(self.save_dir, f'eval_humanml_{(self.total_step()):09d}.log')
-            diversity_times = 300
-            mm_num_times = 0  # mm is super slow hence we won't run it during training
-            eval_dict = eval_humanml.evaluation(
-                self.eval_wrapper, self.eval_gt_data, self.eval_data, log_file,
-                replication_times=self.args.eval_rep_times, diversity_times=diversity_times, mm_num_times=mm_num_times, run_mm=False)
-            print(eval_dict)
-            for k, v in eval_dict.items():
-                if k.startswith('R_precision'):
-                    for i in range(len(v)):
-                        self.train_platform.report_scalar(name=f'top{i + 1}_' + k, value=v[i],
-                                                          iteration=self.total_step(),
-                                                          group_name='Eval')
-                else:
-                    self.train_platform.report_scalar(name=k, value=v, iteration=self.total_step(),
-                                                      group_name='Eval')
-
-        elif self.dataset in ['humanact12', 'uestc']:
-            eval_args = SimpleNamespace(num_seeds=self.args.eval_rep_times, num_samples=self.args.eval_num_samples,
-                                        batch_size=self.args.eval_batch_size, device=self.device, guidance_param = 1,
-                                        dataset=self.dataset, unconstrained=self.args.unconstrained,
-                                        model_path=os.path.join(self.save_dir, self.ckpt_file_name()))
-            eval_dict = eval_humanact12_uestc.evaluate(eval_args, model=self.model, diffusion=self.diffusion, data=self.data.dataset)
-            print(f'Evaluation results on {self.dataset}: {sorted(eval_dict["feats"].items())}')
-            for k, v in eval_dict["feats"].items():
-                if 'unconstrained' not in k:
-                    self.train_platform.report_scalar(name=k, value=np.array(v).astype(float).mean(), iteration=self.step, group_name='Eval')
-                else:
-                    self.train_platform.report_scalar(name=k, value=np.array(v).astype(float).mean(), iteration=self.step, group_name='Eval Unconstrained')
-
-        end_eval = time.time()
-        print(f'Evaluation time: {round(end_eval-start_eval)/60}min')
+        # 仅使用 motion_stat_300 时，不运行原有 HumanML / HumanAct12 / UESTC 的评估流程
+        return
 
 
     def run_step(self, batch, cond):

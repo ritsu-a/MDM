@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import clip
-from model.rotation2xyz import Rotation2xyz
 from model.BERT.BERT_encoder import load_bert
 from utils.misc import WeightedSum
 
@@ -129,13 +128,11 @@ class MDM(nn.Module):
                 self.embed_action = EmbedAction(self.num_actions, self.latent_dim)
                 print('EMBED ACTION')
 
-        self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
-                                            self.nfeats)
+        self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim,
+                                            self.njoints, self.nfeats)
 
-        if self.dataset == 'motion_stat_300':
-            self.rot2xyz = None
-        else:
-            self.rot2xyz = Rotation2xyz(device='cpu', dataset=self.dataset)
+        # 当前工程仅保留 motion_stat_300，不再依赖 SMPL / Rotation2xyz
+        self.rot2xyz = None
 
     def parameters_wo_clip(self):
         return [p for name, p in self.named_parameters() if not name.startswith('clip_model.')]

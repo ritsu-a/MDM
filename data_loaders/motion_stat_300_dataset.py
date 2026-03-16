@@ -120,10 +120,27 @@ class MotionStat300Dataset(data.Dataset):
     def inv_transform(self, x: torch.Tensor) -> torch.Tensor:
         """
         Inverse normalization.
-        Accepts (B, T, 1, 60) or (B, T, 60) and returns (B, T, 60).
+        Tries to coerce common layout variants to (B, T, 60):
+          - (B, T, 60)
+          - (B, T, 1, 60)
+          - (B, 1, T, 60)
+          - (B, 60, T, 1)  # e.g. (B, C, T, 1)
         """
-        if x.ndim == 4 and x.shape[2] == 1:
-            x = x.squeeze(2)
+        if x.ndim == 4:
+            # (B, T, 1, 60) -> (B, T, 60)
+            if x.shape[2] == 1 and x.shape[3] == 60:
+                x = x.squeeze(2)
+            # (B, 1, T, 60) -> (B, T, 60)
+            elif x.shape[1] == 1 and x.shape[3] == 60:
+                x = x.squeeze(1)
+            # (B, 60, T, 1) -> (B, T, 60)
+            elif x.shape[1] == 60 and x.shape[3] == 1:
+                x = x.permute(0, 2, 1, 3).squeeze(3)
+            else:
+                raise ValueError(
+                    f"Expected normalized motion with shape (B,T,60) or (B,T,1,60), "
+                    f"or a simple layout variant, got {tuple(x.shape)}"
+                )
         if x.ndim != 3:
             raise ValueError(f"Expected normalized motion with shape (B,T,60) or (B,T,1,60), got {tuple(x.shape)}")
         mean = torch.from_numpy(self.mean).to(device=x.device, dtype=x.dtype).view(1, 1, -1)

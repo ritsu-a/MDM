@@ -12,12 +12,8 @@ from utils.model_util import create_model_and_diffusion, load_saved_model
 from utils import dist_util
 from utils.sampler_util import ClassifierFreeSampleModel, AutoRegressiveSampler
 from data_loaders.get_data import get_dataset_loader
-from data_loaders.humanml.scripts.motion_process import recover_from_ric, get_target_location, sample_goal
-import data_loaders.humanml.utils.paramUtil as paramUtil
-from data_loaders.humanml.utils.plot_script import plot_3d_motion
 import shutil
 from data_loaders.tensors import collate
-from moviepy.editor import clips_array
 import subprocess
 
 
@@ -27,15 +23,15 @@ def main(args=None):
         args = generate_args()
     fixseed(args.seed)
     out_path = args.output_dir
-    n_joints = 22 if args.dataset == 'humanml' else 21
+    # 当前工程仅保留 motion_stat_300
+    if args.dataset != 'motion_stat_300':
+        raise ValueError(f"当前代码仅支持 dataset=motion_stat_300，收到: {args.dataset}")
+    n_joints = 21
     name = os.path.basename(os.path.dirname(args.model_path))
     niter = os.path.basename(args.model_path).replace('model', '').replace('.pt', '')
-    if args.dataset == 'motion_stat_300':
-        max_frames = 300
-        fps = 60
-    else:
-        max_frames = 196 if args.dataset in ['kit', 'humanml'] else 60
-        fps = 12.5 if args.dataset == 'kit' else 20
+    # motion_stat_300: 固定 300 帧、60fps
+    max_frames = 300
+    fps = 60
     n_frames = min(max_frames, int(args.motion_length*fps))
     is_using_data = not any([args.input_text, args.text_prompt, args.action_file, args.action_name])
     if args.context_len > 0:
@@ -109,16 +105,9 @@ def main(args=None):
         if texts is not None:
             model_kwargs['y']['text'] = texts
     else:
+        # 仅支持文本条件（t2m），不再支持 a2m
         collate_args = [{'inp': torch.zeros(n_frames), 'tokens': None, 'lengths': n_frames}] * args.num_samples
-        is_t2m = any([args.input_text, args.text_prompt])
-        if is_t2m:
-            # t2m
-            collate_args = [dict(arg, text=txt) for arg, txt in zip(collate_args, texts)]
-        else:
-            # a2m
-            action = data.dataset.action_name_to_action(action_text)
-            collate_args = [dict(arg, action=one_action, action_text=one_action_text) for
-                            arg, one_action, one_action_text in zip(collate_args, action, action_text)]
+        collate_args = [dict(arg, text=txt) for arg, txt in zip(collate_args, texts)]
         _, model_kwargs = collate(collate_args)
 
     model_kwargs['y'] = {key: val.to(dist_util.dev()) if torch.is_tensor(val) else val for key, val in model_kwargs['y'].items()}
@@ -163,27 +152,13 @@ def main(args=None):
             const_noise=False,
         )
 
-        if args.dataset == 'motion_stat_300':
-            # motion_stat_300: keep qpos in original feature space (no SMPL / rot2xyz / recover_from_ric)
-            qpos = data.dataset.t2m_dataset.inv_transform(sample.cpu().permute(0, 2, 3, 1)).float().numpy()  # (B,T,60) or (B,T,1,60)
-            if qpos.ndim == 4 and qpos.shape[2] == 1:
-                qpos = np.squeeze(qpos, axis=2)
-            if qpos.ndim != 3:
-                raise ValueError(f"Unexpected qpos shape for motion_stat_300: {qpos.shape}")
-            all_qpos.append(qpos)
-        else:
-            # Recover XYZ *positions* from HumanML3D vector representation
-            if model.data_rep == 'hml_vec':
-                n_joints = 22 if sample.shape[1] == 263 else 21
-                sample = data.dataset.t2m_dataset.inv_transform(sample.cpu().permute(0, 2, 3, 1)).float()
-                sample = recover_from_ric(sample, n_joints)
-                sample = sample.view(-1, *sample.shape[2:]).permute(0, 2, 3, 1)
-
-            rot2xyz_pose_rep = 'xyz' if model.data_rep in ['xyz', 'hml_vec'] else model.data_rep
-            rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, n_frames).bool()
-            sample = model.rot2xyz(x=sample, mask=rot2xyz_mask, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
-                                   jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
-                                   get_rotations_back=False)
+        # motion_stat_300: 直接在原始特征空间输出 qpos（不做 SMPL / rot2xyz / recover_from_ric）
+        qpos = data.dataset.t2m_dataset.inv_transform(sample.cpu().permute(0, 2, 3, 1)).float().numpy()  # (B,T,60) or (B,T,1,60)
+        if qpos.ndim == 4 and qpos.shape[2] == 1:
+            qpos = np.squeeze(qpos, axis=2)
+        if qpos.ndim != 3:
+            raise ValueError(f"Unexpected qpos shape for motion_stat_300: {qpos.shape}")
+        all_qpos.append(qpos)
 
         if args.unconstrained:
             all_text += ['unconstrained'] * args.num_samples
@@ -191,10 +166,7 @@ def main(args=None):
             text_key = 'text' if 'text' in model_kwargs['y'] else 'action_text'
             all_text += model_kwargs['y'][text_key]
 
-        if args.dataset == 'motion_stat_300':
-            all_motions.append(all_qpos[-1])
-        else:
-            all_motions.append(sample.cpu().numpy())
+        all_motions.append(all_qpos[-1])
         _len = model_kwargs['y']['lengths'].cpu().numpy()
         if 'prefix' in model_kwargs['y'].keys():
             _len[:] = sample.shape[-1]
@@ -226,136 +198,45 @@ def main(args=None):
     with open(npy_path.replace('.npy', '_len.txt'), 'w') as fw:
         fw.write('\n'.join([str(l) for l in all_lengths]))
 
-    if args.dataset == 'motion_stat_300':
-        if args.save_npz:
-            npz_dir = os.path.join(out_path, "npz")
-            os.makedirs(npz_dir, exist_ok=True)
-            for i in range(total_num_samples):
-                np.savez(os.path.join(npz_dir, f"sample{i:04d}.npz"), qpos=all_motions[i])
-        if args.render_video:
-            if not args.save_npz:
-                raise ValueError("--render_video requires --save_npz for motion_stat_300.")
-            if not os.path.isfile(args.render_script_path):
-                raise FileNotFoundError(f"Render script not found: {args.render_script_path}")
-            videos_dir = os.path.join(out_path, "videos")
-            os.makedirs(videos_dir, exist_ok=True)
-            for i in range(total_num_samples):
-                npz_path = os.path.join(out_path, "npz", f"sample{i:04d}.npz")
-                mp4_path = os.path.join(videos_dir, f"sample{i:04d}.mp4")
-                subprocess.run(
-                    [
-                        "python",
-                        args.render_script_path,
-                        "--npz_path",
-                        npz_path,
-                        "--video_path",
-                        mp4_path,
-                        "--motion_fps",
-                        str(args.motion_fps),
-                    ],
-                    check=True,
-                )
-        abs_path = os.path.abspath(out_path)
-        print(f'[Done] Results are at [{abs_path}]')
-        return out_path
-
-    print(f"saving visualizations to [{out_path}]...")
-    skeleton = paramUtil.kit_kinematic_chain if args.dataset == 'kit' else paramUtil.t2m_kinematic_chain
-
-    sample_print_template, row_print_template, all_print_template, \
-    sample_file_template, row_file_template, all_file_template = construct_template_variables(args.unconstrained)
-    max_vis_samples = 6
-    num_vis_samples = min(args.num_samples, max_vis_samples)
-    animations = np.empty(shape=(args.num_samples, args.num_repetitions), dtype=object)
-    max_length = max(all_lengths)
-
-    for sample_i in range(args.num_samples):
-        rep_files = []
-        for rep_i in range(args.num_repetitions):
-            caption = all_text[rep_i*args.batch_size + sample_i]
-            if args.dynamic_text_path != '':  # caption per frame
-                assert type(caption) == list
-                caption_per_frame = []
-                for c in caption:
-                    caption_per_frame += [c] * args.pred_len
-                caption = caption_per_frame
-
-            
-            # Trim / freeze motion if needed
-            length = all_lengths[rep_i*args.batch_size + sample_i]
-            motion = all_motions[rep_i*args.batch_size + sample_i].transpose(2, 0, 1)[:max_length]
-            if motion.shape[0] > length:
-                motion[length:-1] = motion[length-1]  # duplicate the last frame to end of motion, so all motions will be in equal length
-
-            save_file = sample_file_template.format(sample_i, rep_i)
-            animation_save_path = os.path.join(out_path, save_file)
-            gt_frames = np.arange(args.context_len) if args.context_len > 0 and not args.autoregressive else []
-            animations[sample_i, rep_i] = plot_3d_motion(animation_save_path, 
-                                                         skeleton, motion, dataset=args.dataset, title=caption, 
-                                                         fps=fps, gt_frames=gt_frames)
-            rep_files.append(animation_save_path)
-
-    save_multiple_samples(out_path, {'all': all_file_template}, animations, fps, max(list(all_lengths) + [n_frames]))
-
+    # motion_stat_300: 保存 qpos 结果与可选的视频渲染
+    if args.save_npz:
+        npz_dir = os.path.join(out_path, "npz")
+        os.makedirs(npz_dir, exist_ok=True)
+        for i in range(total_num_samples):
+            np.savez(os.path.join(npz_dir, f"sample{i:04d}.npz"), qpos=all_motions[i])
+    if args.render_video:
+        if not args.save_npz:
+            raise ValueError("--render_video requires --save_npz for motion_stat_300.")
+        if not os.path.isfile(args.render_script_path):
+            raise FileNotFoundError(f"Render script not found: {args.render_script_path}")
+        videos_dir = os.path.join(out_path, "videos")
+        os.makedirs(videos_dir, exist_ok=True)
+        for i in range(total_num_samples):
+            npz_path = os.path.join(out_path, "npz", f"sample{i:04d}.npz")
+            mp4_path = os.path.join(videos_dir, f"sample{i:04d}.mp4")
+            subprocess.run(
+                [
+                    "python",
+                    args.render_script_path,
+                    "--npz_path",
+                    npz_path,
+                    "--video_path",
+                    mp4_path,
+                    "--motion_fps",
+                    str(args.motion_fps),
+                ],
+                check=True,
+            )
     abs_path = os.path.abspath(out_path)
     print(f'[Done] Results are at [{abs_path}]')
-
     return out_path
-
-
-def save_multiple_samples(out_path, file_templates,  animations, fps, max_frames, no_dir=False):
-    
-    num_samples_in_out_file = 3
-    n_samples = animations.shape[0]
-    
-    for sample_i in range(0,n_samples,num_samples_in_out_file):
-        last_sample_i = min(sample_i+num_samples_in_out_file, n_samples)
-        all_sample_save_file = file_templates['all'].format(sample_i, last_sample_i-1)
-        if no_dir and n_samples <= num_samples_in_out_file:
-            all_sample_save_path = out_path
-        else:
-            all_sample_save_path = os.path.join(out_path, all_sample_save_file)
-            print(f'saving {os.path.split(out_path)[1]}/{all_sample_save_file}')
-
-        clips = clips_array(animations[sample_i:last_sample_i])
-        clips.duration = max_frames/fps
-        
-        # import time
-        # start = time.time()
-        clips.write_videofile(all_sample_save_path, fps=fps, threads=4, logger=None)
-        # print(f'duration = {time.time()-start}')
-        
-        for clip in clips.clips: 
-            # close internal clips. Does nothing but better use in case one day it will do something
-            clip.close()
-        clips.close()  # important
- 
-
-def construct_template_variables(unconstrained):
-    row_file_template = 'sample{:02d}.mp4'
-    all_file_template = 'samples_{:02d}_to_{:02d}.mp4'
-    if unconstrained:
-        sample_file_template = 'row{:02d}_col{:02d}.mp4'
-        sample_print_template = '[{} row #{:02d} column #{:02d} | -> {}]'
-        row_file_template = row_file_template.replace('sample', 'row')
-        row_print_template = '[{} row #{:02d} | all columns | -> {}]'
-        all_file_template = all_file_template.replace('samples', 'rows')
-        all_print_template = '[rows {:02d} to {:02d} | -> {}]'
-    else:
-        sample_file_template = 'sample{:02d}_rep{:02d}.mp4'
-        sample_print_template = '["{}" ({:02d}) | Rep #{:02d} | -> {}]'
-        row_print_template = '[ "{}" ({:02d}) | all repetitions | -> {}]'
-        all_print_template = '[samples {:02d} to {:02d} | all repetitions | -> {}]'
-
-    return sample_print_template, row_print_template, all_print_template, \
-           sample_file_template, row_file_template, all_file_template
 
 
 def load_dataset(args, max_frames, n_frames):
     data = get_dataset_loader(name=args.dataset,
                               batch_size=args.batch_size,
                               num_frames=max_frames,
-                              split='test',
+                              split='val',
                               hml_mode='train' if args.pred_len > 0 else 'text_only',  # We need to sample a prefix from the dataset
                               fixed_len=args.pred_len + args.context_len, pred_len=args.pred_len, device=dist_util.dev(),
                               data_dir=args.data_dir if getattr(args, "data_dir", "") else "")
