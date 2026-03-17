@@ -22,11 +22,11 @@ class ClassifierFreeSampleModel(nn.Module):
         self.nfeats = self.model.nfeats
         self.data_rep = self.model.data_rep
         self.cond_mode = self.model.cond_mode
-        self.encode_text = self.model.encode_text
 
     def forward(self, x, timesteps, y=None):
         cond_mode = self.model.cond_mode
-        assert cond_mode in ['text', 'action']
+        # 兼容 text / action / audio 等多种条件，只要模型内部支持 y['uncond'] 分支即可
+        assert cond_mode in ['text', 'action', 'audio'], f'Unsupported cond_mode for CFG: {cond_mode}'
         y_uncond = deepcopy(y)
         y_uncond['uncond'] = True
         out = self.model(x, timesteps, y)

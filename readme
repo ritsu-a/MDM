@@ -9,7 +9,7 @@ motion stat 300 t2m training
 motion stat 300 t2m inference
     conda activate mdm
     CUDA_VISIBLE_DEVICES=2 python -m sample.generate \
-    --model_path ./save/my_motion_stat_300/model000100000.pt \
+    --model_path ./save/motion_stat_300_t2m_v2/model000030000.pt \
     --dataset motion_stat_300 \
     --text_prompt "The character's right arm slowly lifts and stretches to the side, drawing a wide arc, as if depicting a long journey, and then slowly returns to the original position.
 " \
@@ -19,14 +19,29 @@ motion stat 300 t2m inference
 
 render video
 
-conda activate MARDM
+    conda activate MARDM
 
-python /root/workspace/MotionDiT/external/GMR/scripts/vis_npz_motion.py \
-  --npz_path /root/workspace/motion-diffusion-model/save/my_motion_stat_300/13/npz/sample0000.npz \
-  --video_path /root/workspace/motion-diffusion-model/save/my_motion_stat_300/13/videos/sample0000.mp4 \
-  --motion_fps 60
+    python /root/workspace/MotionDiT/external/GMR/scripts/vis_npz_motion.py \
+    --npz_path /root/workspace/motion-diffusion-model/save/beat_v2_a2m/samples_beat_v2_a2m_000300000_seed10_1_1_wayne_1_12_12_seg114/npz/sample0000.npz \
+    --video_path /root/workspace/motion-diffusion-model/save/beat_v2_a2m/samples_beat_v2_a2m_000300000_seed10_1_1_wayne_1_12_12_seg114/videos/sample0000.mp4 \
+    --motion_fps 60
 
-beat a2m
+beat a2m training
+CUDA_VISIBLE_DEVICES=2 python -m train.train_mdm \
+  --save_dir save/beat_v2_a2m \
+  --dataset beat_v2 \
+  --overwrite
+
+beat v2 a2m inference (single npz)
+    conda activate mdm
+    CUDA_VISIBLE_DEVICES=2 python -m sample.generate_a2m \
+    --model_path ./save/beat_v2_a2m/model000300000.pt \
+    --dataset beat_v2 \
+    --data_dir ./data/BEAT_v2/segment_1wayne \
+    --input_npz /root/workspace/motion-diffusion-model/data/BEAT_v2/segment_1wayne/1_1_wayne_1_12_12_seg114.npz \
+    --motion_frames 300 \
+    --guidance_param 1.0 \
+    --save_npz
 
 
 

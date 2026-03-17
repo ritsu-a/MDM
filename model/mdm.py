@@ -123,6 +123,34 @@ class MDM(nn.Module):
                     raise ValueError('We only support [CLIP, BERT] text encoders') 
                 
                 self.embed_text = nn.Linear(self.clip_dim, self.latent_dim)
+            elif 'audio' in self.cond_mode:
+                # 使用预计算的 whisper 时序特征 (T, 512)，先通过音频 Transformer 编码，再做 pooling 得到全局向量
+                print('EMBED AUDIO (with temporal Transformer)')
+                self.clip_dim = kargs.get('audio_dim', self.clip_dim)  # 默认 512
+
+                audio_n_layers = kargs.get('audio_n_layers', 2)
+                audio_n_heads = kargs.get('audio_n_heads', 4)
+                audio_ff = kargs.get('audio_ff', 1024)
+                audio_dropout = kargs.get('audio_dropout', 0.1)
+
+                audio_encoder_layer = nn.TransformerEncoderLayer(
+                    d_model=self.clip_dim,
+                    nhead=audio_n_heads,
+                    dim_feedforward=audio_ff,
+                    dropout=audio_dropout,
+                    activation=self.activation,
+                )
+                self.audio_encoder = nn.TransformerEncoder(
+                    audio_encoder_layer,
+                    num_layers=audio_n_layers,
+                )
+                # 独立的 audio 位置编码（工作在 512 维上）
+                self.audio_pos_encoder = PositionalEncoding(
+                    self.clip_dim, audio_dropout, max_len=kargs.get('audio_pos_max_len', 1000)
+                )
+
+                # 仍然映射到模型的 latent_dim，与文本条件保持同一接口
+                self.embed_text = nn.Linear(self.clip_dim, self.latent_dim)
                 
             if 'action' in self.cond_mode:
                 self.embed_action = EmbedAction(self.num_actions, self.latent_dim)
@@ -221,6 +249,26 @@ class MDM(nn.Module):
             else:
                 emb = torch.cat([time_emb, text_emb], dim=0)
                 text_mask = torch.cat([torch.zeros_like(text_mask[:, 0:1]), text_mask], dim=1)
+        elif 'audio' in self.cond_mode:
+            # y['audio']: [bs, Ta, 512]，先通过时序 Transformer，再做时间维 pooling 得到全局向量
+            assert 'audio' in y, "Expected 'audio' key in condition dict when using audio cond_mode"
+            enc_audio = y['audio']  # [bs, Ta, clip_dim]
+            if enc_audio.dim() != 3:
+                raise ValueError(f"Expected audio condition of shape [bs, T, {self.clip_dim}], got {enc_audio.shape}")
+
+            bs_a, Ta, Ca = enc_audio.shape
+            # [Ta, bs, C]
+            audio_seq = enc_audio.permute(1, 0, 2)
+            audio_seq = self.audio_pos_encoder(audio_seq)
+
+            # 不使用 padding mask，因为在 dataset 中已经统一裁剪 / 补零到固定长度
+            audio_hid = self.audio_encoder(audio_seq)  # [Ta, bs, C]
+
+            # 对时间维做 mean pooling，得到一个全局 audio 表达 [1, bs, C]
+            audio_global = audio_hid.mean(dim=0, keepdim=True)
+
+            text_emb = self.embed_text(self.mask_cond(audio_global, force_mask=force_mask))  # [1, bs, latent_dim]
+            emb = text_emb + time_emb
         if 'action' in self.cond_mode:
             action_emb = self.embed_action(y['action'])
             emb = time_emb + self.mask_cond(action_emb, force_mask=force_mask)

@@ -51,6 +51,11 @@ def get_model_args(args, data):
         data_rep = 'hml_vec'
         njoints = 60
         nfeats = 1
+    elif args.dataset == 'beat_v2':
+        # BEAT_v2 的 motion 维度与 motion_stat_300 一致（每帧 60 维），这里复用相同配置
+        data_rep = 'hml_vec'
+        njoints = 60
+        nfeats = 1
 
     # Compatibility with old models
     if not hasattr(args, 'pred_len'):

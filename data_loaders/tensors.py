@@ -43,6 +43,10 @@ def collate(batch):
         textbatch = [b['tokens'] for b in notnone_batches]
         cond['y'].update({'tokens': textbatch})
 
+    if 'audio' in notnone_batches[0]:
+        audiobatch = [b['audio'] for b in notnone_batches]
+        cond['y'].update({'audio': collate_tensors(audiobatch)})
+
     if 'action' in notnone_batches[0]:
         actionbatch = [b['action'] for b in notnone_batches]
         cond['y'].update({'action': torch.as_tensor(actionbatch).unsqueeze(1)})
@@ -69,13 +73,19 @@ def t2m_collate(batch, target_batch_size):
     repeated_batch = batch * repeat_factor 
     full_batch = repeated_batch[:target_batch_size]  # Truncate to the target batch size
     # batch.sort(key=lambda x: x[3], reverse=True)
-    adapted_batch = [{
-        'inp': torch.tensor(b[4].T).float().unsqueeze(1), # [seqlen, J] -> [J, 1, seqlen]
-        'text': b[2], #b[0]['caption']
-        'tokens': b[6],
-        'lengths': b[5],
-        'key': b[7] if len(b) > 7 else None,
-    } for b in full_batch]
+    adapted_batch = []
+    for b in full_batch:
+        sample = {
+            'inp': torch.tensor(b[4].T).float().unsqueeze(1), # [seqlen, J] -> [J, 1, seqlen]
+            'text': b[2], #b[0]['caption']
+            'tokens': b[6],
+            'lengths': b[5],
+            'key': b[7] if len(b) > 7 else None,
+        }
+        # 对于包含音频特征的样本，加入 audio 条目
+        if len(b) > 8:
+            sample['audio'] = torch.tensor(b[8]).float()
+        adapted_batch.append(sample)
     return collate(adapted_batch)
 
 
@@ -90,5 +100,27 @@ def t2m_prefix_collate(batch, pred_len):
         'orig_lengths': b[5][0], #  For evaluation
         'key': b[7] if len(b) > 7 else None,
     } for b in batch]
+    return collate(adapted_batch)
+
+
+def beat_v2_collate(batch, target_batch_size):
+    """
+    Collate for BEAT_v2 audio-to-motion:
+      each item: (audio_feat, motion, length, key)
+    """
+    repeat_factor = -(-target_batch_size // len(batch))  # Ceiling division
+    repeated_batch = batch * repeat_factor
+    full_batch = repeated_batch[:target_batch_size]
+
+    adapted_batch = []
+    for b in full_batch:
+        audio_feat, motion, length, key = b
+        sample = {
+            'inp': torch.tensor(motion.T).float().unsqueeze(1),  # [seqlen, J] -> [J, 1, seqlen]
+            'lengths': length,
+            'audio': torch.tensor(audio_feat).float(),
+            'key': key,
+        }
+        adapted_batch.append(sample)
     return collate(adapted_batch)
 

@@ -42,10 +42,13 @@ class TrainLoop:
         if self.args.use_ema:
             self.model_avg = copy.deepcopy(self.model)
         self.model_for_eval = self.model_avg if self.args.use_ema else self.model
-        if args.gen_guidance_param != 1:
-            self.model_for_eval = ClassifierFreeSampleModel(self.model_for_eval)   # wrapping model with the classifier-free sampler
+
+        self.cond_mode = getattr(model, "cond_mode", "no_cond")
+        # 对除 'no_cond' 之外的所有条件（text / action / audio）都支持 CFG
+        if args.gen_guidance_param != 1 and self.cond_mode != "no_cond":
+            self.model_for_eval = ClassifierFreeSampleModel(self.model_for_eval)
+
         self.diffusion = diffusion
-        self.cond_mode = model.cond_mode
         self.data = data
         self.batch_size = args.batch_size
         self.microbatch = args.batch_size  # deprecating this option

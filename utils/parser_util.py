@@ -136,8 +136,8 @@ def add_model_options(parser):
 
 def add_data_options(parser):
     group = parser.add_argument_group('dataset')
-    group.add_argument("--dataset", default='motion_stat_300', choices=['motion_stat_300'], type=str,
-                       help="Dataset name (only motion_stat_300 is supported in this setup).")
+    group.add_argument("--dataset", default='motion_stat_300', choices=['motion_stat_300', 'beat_v2'], type=str,
+                       help="Dataset name (motion_stat_300 for text-to-motion, beat_v2 for audio-to-motion).")
     group.add_argument("--data_dir", default="", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
 
@@ -272,8 +272,14 @@ def add_evaluation_options(parser):
 
 
 def get_cond_mode(args):
-    # 当前工程仅支持 motion_stat_300，并且统一采用文本条件
-    return 'text'
+    # motion_stat_300 走 text condition，beat_v2 走 audio condition
+    if getattr(args, "unconstrained", False):
+        return "no_cond"
+    if args.dataset == "motion_stat_300":
+        return "text"
+    if args.dataset == "beat_v2":
+        return "audio"
+    return "no_cond"
 
 
 def train_args():
