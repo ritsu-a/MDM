@@ -1,0 +1,44 @@
+name: mdm310
+channels:
+  # pytorch-cuda=12.1 is published via pytorch + nvidia channels
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+
+  # Core ML stack (CUDA 12.1)
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.1
+
+  # Common scientific/python utilities (leave solver freedom on builds)
+  - numpy
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - pillow
+  - tqdm
+  - trimesh
+  - requests
+  - beautifulsoup4
+  - h5py
+  - lxml
+  - filelock
+  - packaging
+  - jinja2
+  - joblib
+
+  # Optional quality-of-life; safe to omit if you want a smaller env
+  - gdown
+
+  # Keep pip-only deps here; do NOT pin old py37-era versions
+  - pip:
+      - chumpy
+      - ftfy
+      - regex
+      - smplx
+      - pycryptodomex
