@@ -1,8 +1,10 @@
 motion stat 300 t2m training
 
     CUDA_VISIBLE_DEVICES=1 python -m train.train_mdm \
-    --save_dir save/motion_stat_300_t2m \
+    --save_dir save/motion_stat_300_t2m_beatNormalization \
     --dataset motion_stat_300 --save_interval 10000 \
+    --norm_data_dir ./data/BEAT_v2/segment_1wayne \
+    --cond_mask_prob 0.1 \
     --overwrite
 
 motion stat 300 t2m inference
@@ -19,14 +21,15 @@ render video
 
 
     python external/GMR/scripts/vis_npz_motion.py \
-    --npz_path /root/workspace/motion-diffusion-model/save/beat_v2_a2m/samples_beat_v2_a2m_000300000_seed10_1_wayne_0_1_1/npz/sample0000.npz \
-    --video_path /root/workspace/motion-diffusion-model/save/beat_v2_a2m/samples_beat_v2_a2m_000300000_seed10_1_wayne_0_1_1/npz/sample0000.mp4 \
+    --npz_path /root/workspace/motion-diffusion-model/data/BEAT_v2/1/1_wayne_0_1_1.npz \
+    --video_path test.mp4 \
     --motion_fps 60
 
 beat a2m training
 CUDA_VISIBLE_DEVICES=2 python -m train.train_mdm \
-  --save_dir save/beat_v2_a2m \
+  --save_dir save/beat_v2_a2m_cfg \
   --dataset beat_v2 \
+  --cond_mask_prob 0.1 \
   --overwrite
 
 beat v2 a2m inference (single npz)
@@ -49,9 +52,35 @@ wav 2 motion:
   --guidance_param 1.0 \
   --save_npz --save_video --attach_wav
 
+
+wav + chunked text prompts (dual t2m+a2m, weighted CFG noise):
+    python -m sample.generate_a2m_t2m_from_wav \
+  --a2m_model_path /root/workspace/motion-diffusion-model/save/beat_v2_a2m_cfg/model000400000.pt \
+  --t2m_model_path /root/workspace/motion-diffusion-model/save/motion_stat_300_t2m_beatNormalization/model000250000.pt \
+  --a2m_dataset beat_v2 \
+  --t2m_dataset motion_stat_300 \
+  --data_dir ./data/BEAT_v2/segment_1wayne \
+  --input_wav /root/workspace/motion-diffusion-model/1_wayne_0_1_1.wav \
+  --guidance_audio 1.0 --guidance_text 1.0 \
+  --weight_audio 1.0 --weight_text 1.0 \
+  --save_npz --save_video --attach_wav
+
+prompts_per_chunk.txt:
+  - one prompt per 5s chunk (aligned to chunking)
+  - empty line means "disable text conditioning for this chunk"
+  - if --prompts_path is omitted and <wav_dir>/<wav_base>.txt doesn't exist, the script will create <wav_dir>/<wav_base>.txt
+    with ASR reference and a bracket prompt placeholder like: `...\t[my prompt]`. Edit inside `[ ... ]` and re-run.
+  - optional: you can pass --prompts_path /path/to/custom.txt to use a custom location/name
+
 output:
+  - <out_dir>/results.npy
   - <out_dir>/npz/sample0000.npz
   - <out_dir>/videos/sample0000.mp4
   - <out_dir>/videos/sample0000_with_wav.mp4
+
+
+
+
+
 
 

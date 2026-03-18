@@ -44,7 +44,8 @@ def main():
                               fixed_len=args.pred_len + args.context_len,
                               pred_len=args.pred_len,
                               device=dist_util.dev(),
-                              data_dir=args.data_dir if getattr(args, 'data_dir', '') else "")
+                              data_dir=args.data_dir if getattr(args, 'data_dir', '') else "",
+                              norm_data_dir=args.norm_data_dir if getattr(args, 'norm_data_dir', '') else "")
 
     print("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)

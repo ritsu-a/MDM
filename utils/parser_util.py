@@ -140,6 +140,13 @@ def add_data_options(parser):
                        help="Dataset name (motion_stat_300 for text-to-motion, beat_v2 for audio-to-motion).")
     group.add_argument("--data_dir", default="", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
+    group.add_argument(
+        "--norm_data_dir",
+        default="",
+        type=str,
+        help="Optional. If set (e.g. a BEAT_v2 dir containing Mean.npy/Std.npy), "
+             "motion_stat_300 will use that mean/std for normalization during training/inference.",
+    )
 
 
 def add_training_options(parser):

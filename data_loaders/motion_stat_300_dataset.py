@@ -89,6 +89,7 @@ class MotionStat300Dataset(data.Dataset):
         glove_root: str = "./glove",
         glove_prefix: str = "our_vab",
         seed: int = 0,
+        norm_data_dir: str = "",
     ):
         super().__init__()
         self.data_root = data_root
@@ -102,7 +103,18 @@ class MotionStat300Dataset(data.Dataset):
             raise FileNotFoundError(f"Split file not found: {split_file}")
         self.ids = _read_id_list(split_file)
 
-        self.mean, self.std = compute_mean_std(self.data_root, pjoin(self.data_root, "train.txt"))
+        if norm_data_dir:
+            mean_path = pjoin(norm_data_dir, "Mean.npy")
+            std_path = pjoin(norm_data_dir, "Std.npy")
+            if not (os.path.isfile(mean_path) and os.path.isfile(std_path)):
+                raise FileNotFoundError(f"norm_data_dir is missing Mean.npy/Std.npy: {norm_data_dir}")
+            self.mean = np.load(mean_path).astype(np.float32)
+            self.std = np.load(std_path).astype(np.float32)
+            if self.mean.shape != (60,) or self.std.shape != (60,):
+                raise ValueError(f"Expected beat-style mean/std shape (60,), got {self.mean.shape} / {self.std.shape}")
+            self.std[self.std < 1e-6] = 1.0
+        else:
+            self.mean, self.std = compute_mean_std(self.data_root, pjoin(self.data_root, "train.txt"))
 
         self.w_vectorizer = WordVectorizer(glove_root, glove_prefix)
         self.max_text_len = 20
@@ -244,6 +256,7 @@ class MotionStat300(data.Dataset):
         device=None,
         autoregressive: bool = False,
         data_dir: str = "",
+        norm_data_dir: str = "",
         cache_path: Optional[str] = None,
     ):
         super().__init__()
@@ -264,6 +277,7 @@ class MotionStat300(data.Dataset):
             cache_path=cache_path,
             glove_root="./glove",
             glove_prefix="our_vab",
+            norm_data_dir=norm_data_dir,
         )
 
     def __len__(self):
