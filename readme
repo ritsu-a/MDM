@@ -55,7 +55,7 @@ wav 2 motion:
 
 wav + chunked text prompts (dual t2m+a2m, weighted CFG noise):
     python -m sample.generate_a2m_t2m_from_wav \
-  --a2m_model_path /root/workspace/motion-diffusion-model/save/beat_v2_a2m_cfg/model000400000.pt \
+  --a2m_model_path /root/workspace/motion-diffusion-model/save/beat_v2_a2m_cfg/model000100000.pt \
   --t2m_model_path /root/workspace/motion-diffusion-model/save/motion_stat_300_t2m_beatNormalization/model000250000.pt \
   --a2m_dataset beat_v2 \
   --t2m_dataset motion_stat_300 \
@@ -77,6 +77,10 @@ output:
   - <out_dir>/npz/sample0000.npz
   - <out_dir>/videos/sample0000.mp4
   - <out_dir>/videos/sample0000_with_wav.mp4
+  - per-chunk:
+    - <out_dir>/chunks/repXXXX/npz/chunkYYYY.npz
+    - <out_dir>/chunks/repXXXX/videos/chunkYYYY.mp4
+    - if --attach_wav (requires ffmpeg + soundfile): chunkYYYY_with_wav.mp4
 
 
 

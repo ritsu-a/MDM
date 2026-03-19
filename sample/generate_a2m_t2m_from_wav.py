@@ -107,6 +107,24 @@ def _slice_audio(wav: np.ndarray, sr: int, chunk_sec: float, overlap_sec: float)
     return chunks
 
 
+def _try_write_wav(path: str, audio: np.ndarray, sr: int) -> bool:
+    """
+    Best-effort wav writer for chunk audio muxing.
+    Returns True if written, False otherwise.
+    """
+    try:
+        import soundfile as sf  # type: ignore
+    except Exception:
+        return False
+
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        sf.write(path, audio.astype(np.float32), sr)
+        return True
+    except Exception:
+        return False
+
+
 @torch.no_grad()
 def _whisper_base_encode_features(audio_5s_16k: np.ndarray, device: torch.device) -> np.ndarray:
     try:
@@ -538,6 +556,17 @@ def main():
     for rep_i in range(int(args.num_repetitions)):
         print(f"### Sampling repetition #{rep_i}")
         seg_qpos_list: List[np.ndarray] = []
+        # Save per-chunk outputs under: <out_dir>/chunks/repXXXX/{npz,videos,audio}
+        chunk_rep_dir = os.path.join(out_dir, "chunks", f"rep{rep_i:04d}")
+        chunk_npz_dir = os.path.join(chunk_rep_dir, "npz")
+        chunk_vid_dir = os.path.join(chunk_rep_dir, "videos")
+        chunk_audio_dir = os.path.join(chunk_rep_dir, "audio")
+        os.makedirs(chunk_npz_dir, exist_ok=True)
+        if args.save_video or args.attach_wav:
+            os.makedirs(chunk_vid_dir, exist_ok=True)
+        if args.attach_wav:
+            os.makedirs(chunk_audio_dir, exist_ok=True)
+
         for ci, chunk in enumerate(audio_chunks):
             whisper_feat = _whisper_base_encode_features(chunk, device=dev)  # (250,512)
             prompt = prompts[ci] if ci < len(prompts) else ""
@@ -575,6 +604,56 @@ def main():
             qpos = pred[0].astype(np.float32)  # (T,60)
             seg_qpos_list.append(qpos)
             print(f"  chunk {ci+1}/{len(audio_chunks)} prompt={'<empty>' if not text_enabled else 'yes'} -> motion {qpos.shape}")
+
+            # Save each chunk as its own npz (and optionally render as mp4).
+            out_chunk_npz = os.path.join(chunk_npz_dir, f"chunk{ci:04d}.npz")
+            np.savez(out_chunk_npz, qpos=qpos)
+            if args.save_video or args.attach_wav:
+                vis_script = os.path.abspath(args.vis_script)
+                if not os.path.isfile(vis_script):
+                    raise FileNotFoundError(
+                        f"Requested --save_video/--attach_wav but visualization script not found: {vis_script}"
+                    )
+                out_chunk_mp4 = os.path.join(chunk_vid_dir, f"chunk{ci:04d}.mp4")
+                cmd = [
+                    "python",
+                    vis_script,
+                    "--npz_path",
+                    out_chunk_npz,
+                    "--video_path",
+                    out_chunk_mp4,
+                    "--motion_fps",
+                    str(int(args.motion_fps)),
+                ]
+                print("Render chunk video:", " ".join(cmd))
+                subprocess.run(cmd, check=True)
+
+                if args.attach_wav:
+                    if shutil.which("ffmpeg") is None:
+                        print("[Warning] ffmpeg not found; skipping chunk audio mux.")
+                    else:
+                        out_chunk_wav = os.path.join(chunk_audio_dir, f"chunk{ci:04d}.wav")
+                        wrote = _try_write_wav(out_chunk_wav, chunk, sr)
+                        if not wrote:
+                            print("[Warning] soundfile not available; skipping chunk audio mux.")
+                        else:
+                            out_chunk_mp4_audio = os.path.join(chunk_vid_dir, f"chunk{ci:04d}_with_wav.mp4")
+                            ffmpeg_cmd = [
+                                "ffmpeg",
+                                "-y",
+                                "-i",
+                                out_chunk_mp4,
+                                "-i",
+                                out_chunk_wav,
+                                "-c:v",
+                                "copy",
+                                "-c:a",
+                                "aac",
+                                "-shortest",
+                                out_chunk_mp4_audio,
+                            ]
+                            print("Mux chunk wav audio:", " ".join(ffmpeg_cmd))
+                            subprocess.run(ffmpeg_cmd, check=True)
 
         stitched = _stitch_with_overlap(seg_qpos_list, overlap=overlap_frames)
         final_motions.append(stitched)
