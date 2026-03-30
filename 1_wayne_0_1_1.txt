@@ -3,7 +3,7 @@
 # You may keep the left columns (id/time/asr) for reference; the loader extracts the last [ ... ] block.
 0000	0.00-5.00s	The first thing I like to do on weekends is relaxing and I'll go	[]
 0001	4.00-9.00s	and I'll go shopping if I'm not that tired. Since I started my job,	[]
-0002	8.00-13.00s	started my job, I think it's very important to get good sleep during the weekend.	[]
+0002	8.00-13.00s	started my job, I think it's very important to get good sleep during the weekend.	[The hands were raised from the sides of the body, briefly closed in front of the chest, and then suddenly spread upwards and outwards, as if exploded by a force. After the movement reaches the peak, slowly lower your arms and return to the original standing position.]
 0003	12.00-17.00s	during the weekend because when you have work Monday to Friday the whole week you're very	[]
 0004	16.00-21.00s	week, you're very tired. So getting a good rest is as important	[]
 0005	20.00-25.00s	is as important as completing an excellent job. In my spare time,	[]

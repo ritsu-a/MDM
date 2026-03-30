@@ -138,3 +138,6 @@ slurm**/
 *.err
 *.slurm
 .vscode/
+semi_videos/
+*.mp4
+outputs/

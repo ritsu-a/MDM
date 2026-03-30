@@ -1,0 +1,11 @@
+/root/workspace/motion-diffusion-model/data/BEAT_v2/1 里存储了
+    *.npz：动作文件，fps为60
+    *.wav：原始的音频文件
+    *_whipser_features.npy: 保存的whisper feature，fps为50
+
+此外，在/root/workspace/motion-diffusion-model/data/BEAT2/beat_english_v2.0.0/sem里存储了每段动作的语义信息
+    例如05_iconic_l	3.092	4.093	1.001	0.5	rilaxing代表3.092-4.093秒有一个iconic的手势。
+
+根据这些sem文件切分原始的动作和音频文件，切分成5s的片段，即保留300帧的动作npz和250帧的whisper feature。要求每个这些特殊的动作切分出一个5s的片段
+忽略01_beat_align这些大段的动作，只需要处理稀少的语义动作。
+

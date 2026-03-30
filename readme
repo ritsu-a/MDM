@@ -21,9 +21,57 @@ render video
 
 
     python external/GMR/scripts/vis_npz_motion.py \
-    --npz_path /root/workspace/motion-diffusion-model/data/BEAT_v2/1/1_wayne_0_1_1.npz \
+    --npz_path /DATA/disk1/data/synthetic_data/SG_2_or_3_long_sentence_1030_en/1.npz \
     --video_path test.mp4 \
     --motion_fps 60
+
+
+BEAT_v2 segment_sem5s：批量把 segments/*.npz 渲染成视频（脚本会把 `motion` 键写成临时 `qpos` npz，因 vis_npz_motion 只读 `qpos`）
+
+    # 在仓库根目录；需已安装 GMR/MuJoCo 等依赖（与单条 vis_npz_motion 相同环境）
+    python prepare/render_concat_sem5s.py \
+      --segments_dir data/BEAT_v2/segment_sem5s/segments \
+      --out_dir outputs/sem5s_videos \
+      --motion_fps 60 \
+      --no_concat
+
+    # 若同目录有同名 .wav，去掉 --no_mux_wav 可额外生成 *_with_wav.mp4；默认最后还会 concat 成 merged_with_wav.mp4
+    python prepare/render_concat_sem5s.py \
+      --segments_dir data/BEAT_v2/segment_sem5s/segments \
+      --out_dir outputs/sem5s_videos \
+      --motion_fps 60
+
+    # 等价 shell：仅当 npz 内已是 `qpos` 键时可用（sem5s 片段默认是 `motion`，请用上一行的 prepare 脚本）
+    SEG=data/BEAT_v2/segment_sem5s/segments
+    OUT=outputs/sem5s_videos
+    mkdir -p "$OUT"
+    for f in "$SEG"/*.npz; do
+      stem=$(basename "$f" .npz)
+      python external/GMR/scripts/vis_npz_motion.py \
+        --npz_path "$f" --video_path "$OUT/${stem}.mp4" --motion_fps 60
+    done
+
+
+render video (1-100) + merge wav + concat
+    conda activate mdm310
+    BASE=/DATA/disk1/data/synthetic_data/SG_2_or_3_long_sentence_1030_en
+    for i in {1..100}; do
+      python external/GMR/scripts/vis_npz_motion.py \
+        --npz_path $BASE/${i}.npz \
+        --video_path semi_videos/${i}.mp4 \
+        --motion_fps 60
+
+      ffmpeg -y -i semi_videos/${i}.mp4 -i $BASE/${i}.wav \
+        -c:v copy -c:a aac -shortest semi_videos/${i}_with_wav.mp4
+    done
+
+    LIST="$(pwd)/semi_videos/concat_1_100.txt"
+    : > "$LIST"
+    for i in {1..100}; do
+      echo "file '$(pwd)/semi_videos/${i}_with_wav.mp4'" >> "$LIST"
+    done
+    ffmpeg -y -f concat -safe 0 -i "$LIST" -c copy "$(pwd)/semi_videos/merged_1_100_with_wav.mp4"
+
 
 beat a2m training
 CUDA_VISIBLE_DEVICES=2 python -m train.train_mdm \
@@ -87,4 +135,9 @@ output:
 
 
 
+use api for text description:
 
+export DMX_API_KEY=""
+python api/batch_render_and_understand_videos.py \
+  --videos-dir  outputs/sem5s_videos \
+  --out-root outputs/sem5s_understand
