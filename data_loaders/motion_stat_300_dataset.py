@@ -3,6 +3,7 @@ import random
 from os.path import join as pjoin
 from typing import Dict, List, Optional, Tuple
 
+import json
 import numpy as np
 import spacy
 import torch
@@ -15,6 +16,26 @@ def _read_id_list(split_file: str) -> List[str]:
     with open(split_file, "r", encoding="utf-8") as f:
         ids = [ln.strip() for ln in f.readlines()]
     return [x for x in ids if x]
+
+def _load_manifest_index(manifest_path: str) -> Dict[str, Dict[str, str]]:
+    """
+    Optional manifest.jsonl support (used by some datasets like SeG_T2M):
+      {"id": "...", "motion_npz": "motions/XXX.npz", "annotation_txt": "annotations/XXX.txt", ...}
+    Returns: id -> record dict
+    """
+    index: Dict[str, Dict[str, str]] = {}
+    if not os.path.isfile(manifest_path):
+        return index
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        for ln in f:
+            ln = ln.strip()
+            if not ln:
+                continue
+            rec = json.loads(ln)
+            sid = rec.get("id", "")
+            if sid:
+                index[sid] = rec
+    return index
 
 
 def _load_motion_npz(motion_npz_path: str) -> np.ndarray:
@@ -103,6 +124,10 @@ class MotionStat300Dataset(data.Dataset):
             raise FileNotFoundError(f"Split file not found: {split_file}")
         self.ids = _read_id_list(split_file)
 
+        # Optional: dataset may provide a manifest mapping IDs to file locations.
+        # Example: data/SeG_T2M/manifest.jsonl with annotation_txt + motion_npz.
+        self._manifest = _load_manifest_index(pjoin(self.data_root, "manifest.jsonl"))
+
         if norm_data_dir:
             mean_path = pjoin(norm_data_dir, "Mean.npy")
             std_path = pjoin(norm_data_dir, "Std.npy")
@@ -163,15 +188,44 @@ class MotionStat300Dataset(data.Dataset):
         return len(self.ids)
 
     def _get_item_uncached(self, sid: str) -> Dict:
-        txt_path = pjoin(self.data_root, f"{sid}.txt")
+        # Caption path resolution:
+        # 1) manifest.jsonl (annotation_txt)
+        # 2) annotations/{ID}.txt (SeG_T2M layout)
+        # 3) {ID}.txt (legacy layout)
+        txt_candidates: List[str] = []
+        rec = self._manifest.get(sid) if hasattr(self, "_manifest") else None
+        if rec and isinstance(rec, dict) and rec.get("annotation_txt"):
+            txt_candidates.append(pjoin(self.data_root, rec["annotation_txt"]))
+        txt_candidates.append(pjoin(self.data_root, "annotations", f"{sid}.txt"))
+        txt_candidates.append(pjoin(self.data_root, f"{sid}.txt"))
+
+        txt_path = next((p for p in txt_candidates if os.path.isfile(p)), txt_candidates[0])
         if not os.path.isfile(txt_path):
-            raise FileNotFoundError(f"Caption file not found: {txt_path}")
+            raise FileNotFoundError(
+                "Caption file not found. Tried: " + ", ".join(txt_candidates)
+            )
         with open(txt_path, "r", encoding="utf-8") as f:
             caption = f.read().strip()
         if not caption:
             caption = "a person moves."
 
-        motion_path = pjoin(self.data_root, f"{sid}_motion.npz")
+        # Motion path resolution:
+        # 1) manifest.jsonl (motion_npz)
+        # 2) motions/{ID}.npz (SeG_T2M layout)
+        # 3) {ID}_motion.npz (legacy layout)
+        # 4) {ID}.npz (alternate legacy)
+        motion_candidates: List[str] = []
+        if rec and isinstance(rec, dict) and rec.get("motion_npz"):
+            motion_candidates.append(pjoin(self.data_root, rec["motion_npz"]))
+        motion_candidates.append(pjoin(self.data_root, "motions", f"{sid}.npz"))
+        motion_candidates.append(pjoin(self.data_root, f"{sid}_motion.npz"))
+        motion_candidates.append(pjoin(self.data_root, f"{sid}.npz"))
+
+        motion_path = next((p for p in motion_candidates if os.path.isfile(p)), motion_candidates[0])
+        if not os.path.isfile(motion_path):
+            raise FileNotFoundError(
+                "Motion npz not found. Tried: " + ", ".join(motion_candidates)
+            )
         motion = _load_motion_npz(motion_path)  # (T,D)
         m_length = motion.shape[0]
 

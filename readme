@@ -1,17 +1,20 @@
-motion stat 300 t2m training
+motion stat 300 t2m training (SeG_T2M, 需与 motion_stat_300 数据格式一致)
 
     CUDA_VISIBLE_DEVICES=1 python -m train.train_mdm \
-    --save_dir save/motion_stat_300_t2m_beatNormalization \
+    --save_dir save/SeG_T2M_t2m_beatNormalization \
     --dataset motion_stat_300 --save_interval 10000 \
+    --data_dir ./data/SeG_T2M \
     --norm_data_dir ./data/BEAT_v2/segment_1wayne \
     --cond_mask_prob 0.1 \
     --overwrite
 
-motion stat 300 t2m inference
+motion stat 300 t2m inference (SeG_T2M 训练出的模型；与训练一致指定 data_dir / norm_data_dir，inv_transform 才与训练时一致)
     CUDA_VISIBLE_DEVICES=2 python -m sample.generate \
-    --model_path ./save/motion_stat_300_t2m_v2/model000030000.pt \
+    --model_path /root/workspace/motion-diffusion-model/save/SeG_T2M_t2m_beatNormalization/model000030000.pt \
     --dataset motion_stat_300 \
-    --text_prompt "The character's right arm slowly lifts and stretches to the side, drawing a wide arc, as if depicting a long journey, and then slowly returns to the original position.
+    --data_dir ./data/SeG_T2M \
+    --norm_data_dir ./data/BEAT_v2/segment_1wayne \
+    --text_prompt "The right arm is raised and extended outward to the side in a sweeping motion with the palm open, as if presenting or indicating something, before being lowered back to its resting position.
 " \
     --motion_length 5 \
     --save_npz
@@ -21,7 +24,7 @@ render video
 
 
     python external/GMR/scripts/vis_npz_motion.py \
-    --npz_path /DATA/disk1/data/synthetic_data/SG_2_or_3_long_sentence_1030_en/1.npz \
+    --npz_path /root/workspace/motion-diffusion-model/save/SeG_T2M_t2m_beatNormalization/1/npz/sample0000.npz \
     --video_path test.mp4 \
     --motion_fps 60
 

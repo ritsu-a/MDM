@@ -233,13 +233,18 @@ def main(args=None):
 
 
 def load_dataset(args, max_frames, n_frames):
-    data = get_dataset_loader(name=args.dataset,
-                              batch_size=args.batch_size,
-                              num_frames=max_frames,
-                              split='val',
-                              hml_mode='train' if args.pred_len > 0 else 'text_only',  # We need to sample a prefix from the dataset
-                              fixed_len=args.pred_len + args.context_len, pred_len=args.pred_len, device=dist_util.dev(),
-                              data_dir=args.data_dir if getattr(args, "data_dir", "") else "")
+    data = get_dataset_loader(
+        name=args.dataset,
+        batch_size=args.batch_size,
+        num_frames=max_frames,
+        split='val',
+        hml_mode='train' if args.pred_len > 0 else 'text_only',  # We need to sample a prefix from the dataset
+        fixed_len=args.pred_len + args.context_len,
+        pred_len=args.pred_len,
+        device=dist_util.dev(),
+        data_dir=args.data_dir if getattr(args, "data_dir", "") else "",
+        norm_data_dir=args.norm_data_dir if getattr(args, "norm_data_dir", "") else "",
+    )
     data.fixed_length = n_frames
     return data
 
